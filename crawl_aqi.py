@@ -1,20 +1,17 @@
 #encoding=utf-8
 from bs4 import BeautifulSoup
 import requests
+import os
+import time
 
 base_url = 'https://www.aqistudy.cn/historydata/daydata.php?city='
-str_city = '北京'
 
 def get_month_set():
+    str_file = r'months.txt'
+    fp = open(str_file, 'rb')
     month_set = list()
-    for i in range(7, 10):
-        month_set.append(('2015-0%s' % i))
-    for i in range(10, 13):
-        month_set.append(('2015-%s' % i))
-    for i in range(1, 10):
-        month_set.append(('2016-0%s' % i))
-    month_set.append(('2016-%s' % 10))
-    month_set.append(('2016-%s' % 11))
+    for line in fp.readlines():
+        month_set.append(str(line.strip()))  # encoding='utf-8'
     return month_set
 
 def get_city_set():
@@ -22,28 +19,58 @@ def get_city_set():
     fp = open(str_file,'rb')
     city_set = list()
     for line in fp.readlines():
-        city_set.append(str(line.strip(),encoding='utf-8'))
+        city_set.append(str(line.strip())) #encoding='utf-8'
     return city_set
 
 month_set = get_month_set()
 city_set = get_city_set()
+# print city_set
+
+if not os.path.isdir("data/"):
+    os.mkdir("data/")
 
 for city in city_set:
-    file_name = city + '.csv'
-    fp = open('aqi/' + file_name, 'w')
-    for i in range(len(month_set)):
-        str_month = month_set[i]
-        weburl = ('%s%s&month=%s' % (base_url,city,str_month))
-        response = requests.get(weburl).content
-        soup = BeautifulSoup(response,'html.parser',from_encoding='utf-8')
-        result = soup.find_all('td',attrs={'align':'center'},recursive=True)
+    if '\xef\xbb\xbf' in city:
+        city = city.replace('\xef\xbb\xbf','')
+    file_name = 'data/' + city.decode('utf8').encode('gbk') + '.csv'
 
-        for j in range(0,len(result) - 11,11):
-            tag_date = result[j]
-            tag_aqi = result[j + 1]
-            record_day = tag_date.get_text().strip()
-            record_aqi = tag_aqi.get_text().strip()
-            fp.write(('%s,%s\n' % (record_day,record_aqi)))
+    with open(file_name, 'w') as fp:
+        #UTF-8 encoded BOM
+        #https://docs.python.org/2/library/codecs.html#encodings-and-unicode
+        fp.write('\xEF\xBB\xBF')
 
-        print('%d---%s,%s---DONE' % (city_set.index(city), city, str_month))
-    fp.close()
+        for i in range(len(month_set)):
+            str_month = month_set[i]
+            print time.ctime(), city.decode('utf8').encode('gbk'), str_month,
+
+            weburl = ('%s%s&month=%s' % (base_url,city,str_month))
+            response = None
+
+            while response is None:
+                try:
+                    response = requests.get(weburl).content
+                except:
+                    pass
+            soup = BeautifulSoup(response,'html.parser',from_encoding='utf-8')
+            result = soup.find_all('td',attrs={'align':'center'},recursive=True)
+
+            if len(result) == 6:
+                print("No Data")
+            else:
+                result = filter(lambda x: 'style' not in x.attrs, result)
+
+                if(len(result)%11 != 0):
+                    print "# of Column Error",
+                else:
+                    print len(result)/11, "days",
+
+                for j in range(0,len(result),11):
+                    # 11 columns per day
+                    # 日期,AQI,范围,质量等级,PM2.5,PM10,SO2,CO,NO2,O3,排名
+                    records = []
+                    for r in range(11):
+                        records.append(result[j + r].get_text().strip().encode('utf-8'))
+
+                    fp.write( ','.join([city] + records) + '\n')
+
+                print('DONE')
